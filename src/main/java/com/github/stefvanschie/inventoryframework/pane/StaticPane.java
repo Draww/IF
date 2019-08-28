@@ -4,12 +4,15 @@ import com.github.stefvanschie.inventoryframework.Gui;
 import com.github.stefvanschie.inventoryframework.GuiItem;
 import com.github.stefvanschie.inventoryframework.exception.XMLLoadException;
 import com.github.stefvanschie.inventoryframework.util.GeometryUtil;
+import me.ialistannen.mininbt.ItemNBTUtil;
+import me.ialistannen.mininbt.NBTWrappers;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -165,40 +168,23 @@ public class StaticPane extends Pane implements Flippable, Rotatable {
         if (onClick != null)
             onClick.accept(event);
 
-		//first we undo the rotation
-		//this is the same as applying a new rotation to match up to 360, so we'll be doing that
-		Map.Entry<Integer, Integer> coordinates = GeometryUtil.processCounterClockwiseRotation(x, y, length, height,
-			rotation);
+        Optional<GuiItem> optionalItem = items.stream().map(Map.Entry::getKey).filter(guiItem -> {
+            NBTWrappers.NBTTagCompound tag = ItemNBTUtil.getTag(event.getCurrentItem());
 
-		int newX = coordinates.getKey(), newY = coordinates.getValue();
+            if (tag == null) {
+                return false;
+            }
 
-		if (flipHorizontally)
-			newX = length - newX - 1;
+            return guiItem.getUUID().equals(UUID.fromString(tag.getString("IF-uuid")));
+        }).findAny();
 
-		if (flipVertically)
-			newY = height - newY - 1;
+        if (optionalItem.isPresent()) {
+            optionalItem.get().getAction().accept(event);
 
-		//find the item on the correct spot
-		for (Map.Entry<GuiItem, Map.Entry<Integer, Integer>> entry : items) {
-			Map.Entry<Integer, Integer> location = entry.getValue();
-			GuiItem item = entry.getKey();
+            return true;
+        }
 
-			if (location.getKey() != newX || location.getValue() != newY ||
-                !item.getItem().equals(event.getCurrentItem()))
-				continue;
-
-			if (!item.isVisible())
-				return false;
-
-			Consumer<InventoryClickEvent> action = item.getAction();
-
-			if (action != null)
-				action.accept(event);
-
-			return true;
-		}
-
-		return false;
+        return false;
 	}
 
 	/**
@@ -217,33 +203,46 @@ public class StaticPane extends Pane implements Flippable, Rotatable {
 	}
 
 	/**
-	 * Fills all empty space in the pane with the given {@code itemStack}
+	 * Fills all empty space in the pane with the given {@code itemStack} and adds the given action
 	 *
 	 * @param itemStack The {@link ItemStack} to fill the empty space with
+	 * @param action    The action called whenever an interaction with the item happens
+     * @since 0.5.9
 	 */
-	@Contract("null -> fail")
-	public void fillWith(@NotNull ItemStack itemStack) {
+	@Contract("null, _ -> fail")
+	public void fillWith(@NotNull ItemStack itemStack, @Nullable Consumer<InventoryClickEvent> action) {
 		//The non empty spots
 		List<Map.Entry<Integer, Integer>> locations = this.items.stream()
-            .map(Map.Entry::getValue)
-            .collect(Collectors.toList());
+			.map(Map.Entry::getValue)
+			.collect(Collectors.toList());
 
 		for (int y = 0; y < this.getHeight(); y++) {
 			for (int x = 0; x < this.getLength(); x++) {
-			    boolean found = false;
+				boolean found = false;
 
-			    for (Map.Entry<Integer, Integer> location : locations) {
-			        if (location.getKey() == x && location.getValue() == y) {
-			            found = true;
-			            break;
-                    }
-                }
+				for (Map.Entry<Integer, Integer> location : locations) {
+					if (location.getKey() == x && location.getValue() == y) {
+						found = true;
+						break;
+					}
+				}
 
-			    if (!found) {
-                    this.addItem(new GuiItem(itemStack), x, y);
-                }
+				if (!found) {
+					this.addItem(new GuiItem(itemStack, action), x, y);
+				}
 			}
 		}
+	}
+
+	/**
+	 * Fills all empty space in the pane with the given {@code itemStack}
+	 *
+	 * @param itemStack The {@link ItemStack} to fill the empty space with
+     * @since 0.2.4
+	 */
+	@Contract("null -> fail")
+	public void fillWith(@NotNull ItemStack itemStack) {
+		this.fillWith(itemStack, null);
 	}
 
 	/**
