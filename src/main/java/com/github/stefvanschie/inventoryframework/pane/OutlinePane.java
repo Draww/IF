@@ -3,6 +3,7 @@ package com.github.stefvanschie.inventoryframework.pane;
 import com.github.stefvanschie.inventoryframework.Gui;
 import com.github.stefvanschie.inventoryframework.GuiItem;
 import com.github.stefvanschie.inventoryframework.exception.XMLLoadException;
+import com.github.stefvanschie.inventoryframework.pane.util.Mask;
 import com.github.stefvanschie.inventoryframework.util.GeometryUtil;
 import org.bukkit.Material;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -55,46 +56,82 @@ public class OutlinePane extends Pane implements Flippable, Orientable, Rotatabl
     private boolean flipHorizontally, flipVertically;
 
     /**
-     * {@inheritDoc}
+     * The mask for this pane
      */
+    @NotNull
+    private Mask mask;
+
     public OutlinePane(int x, int y, int length, int height, @NotNull Priority priority) {
         super(x, y, length, height, priority);
 
         this.items = new ArrayList<>(length * height);
         this.orientation = Orientation.HORIZONTAL;
+
+        String[] mask = new String[height];
+        StringBuilder maskString = new StringBuilder();
+
+        for (int i = 0; i < length; i++) {
+            maskString.append('1');
+        }
+
+        Arrays.fill(mask, maskString.toString());
+
+        this.mask = new Mask(mask);
     }
 
-    /**
-     * {@inheritDoc}
-     */
     public OutlinePane(int x, int y, int length, int height) {
         this(x, y, length, height, Priority.NORMAL);
     }
 
-    /**
-     * {@inheritDoc}
-     */
     public OutlinePane(int length, int height) {
-        super(length, height);
-
-        this.items = new ArrayList<>(length * height);
-        this.orientation = Orientation.HORIZONTAL;
+        this(0, 0, length, height);
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public void display(@NotNull Gui gui, @NotNull Inventory inventory, @NotNull PlayerInventory playerInventory,
                         int paneOffsetX, int paneOffsetY, int maxLength, int maxHeight) {
         int length = Math.min(this.length, maxLength);
         int height = Math.min(this.height, maxHeight);
 
-        int x = 0;
-        int y = 0;
+        int x = 0, y = 0;
 
-        for (int i = 0; i < (repeat ? length * height : items.size()); i++) {
-            GuiItem item = items.get(i % items.size());
+        if (orientation == Orientation.HORIZONTAL) {
+            outerloop:
+            for (int rowIndex = 0; rowIndex < mask.getHeight(); rowIndex++) {
+                boolean[] row = mask.getRow(rowIndex);
+
+                for (int columnIndex = 0; columnIndex < row.length; columnIndex++) {
+                    if (!row[columnIndex]) {
+                        continue;
+                    }
+
+                    x = columnIndex;
+                    y = rowIndex;
+                    break outerloop;
+                }
+            }
+        } else if (orientation == Orientation.VERTICAL) {
+            outerloop:
+            for (int columnIndex = 0; columnIndex < mask.getLength(); columnIndex++) {
+                boolean[] column = mask.getColumn(columnIndex);
+
+                for (int rowIndex = 0; rowIndex < column.length; rowIndex++) {
+                    if (!column[rowIndex]) {
+                        continue;
+                    }
+
+                    x = columnIndex;
+                    y = rowIndex;
+                    break outerloop;
+                }
+            }
+        }
+
+        int itemAmount = items.size();
+
+        outerloop:
+        for (int i = 0; i < (doesRepeat() ? mask.amountOfEnabledSlots() : itemAmount); i++) {
+            GuiItem item = items.get(i % itemAmount);
 
             if (!item.isVisible())
                 continue;
@@ -125,32 +162,37 @@ public class OutlinePane extends Pane implements Flippable, Orientable, Rotatabl
                 inventory.setItem(finalRow * 9 + finalColumn, item.getItem());
             }
 
-            //increment positions
-            if (orientation == Orientation.HORIZONTAL) {
-                x += gap + 1;
+            int gapCount = gap;
 
-                if (x >= length) {
-                    y += x / length;
-                    x %= length;
+            do {
+                if (orientation == Orientation.HORIZONTAL) {
+                    x++;
+
+                    if (x >= length) {
+                        y++;
+                        x = 0;
+                    }
+                } else if (orientation == Orientation.VERTICAL) {
+                    y++;
+
+                    if (y >= height) {
+                        x++;
+                        y = 0;
+                    }
                 }
-            } else if (orientation == Orientation.VERTICAL) {
-                y += gap + 1;
 
-                if (y >= height) {
-                    x += y / height;
-                    y %= height;
+                //stop the loop when there is no more space in the pane
+                if (x >= length || y >= height) {
+                    break outerloop;
                 }
-            }
 
-            //stop the loop when there is no more space in the pane
-            if (x >= length || y >= height)
-                break;
+                if (mask.isEnabled(x, y)) {
+                    gapCount--;
+                }
+            } while (gapCount >= 0);
         }
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public boolean click(@NotNull Gui gui, @NotNull InventoryClickEvent event, int paneOffsetX, int paneOffsetY,
                          int maxLength, int maxHeight) {
@@ -198,9 +240,6 @@ public class OutlinePane extends Pane implements Flippable, Orientable, Rotatabl
         return true;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public void setRotation(int rotation) {
         if (length != height) {
@@ -243,25 +282,32 @@ public class OutlinePane extends Pane implements Flippable, Orientable, Rotatabl
         items.remove(item);
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public void clear() {
         items.clear();
     }
 
     /**
-     * {@inheritDoc}
+     * Applies a custom mask to this pane. This will throw an {@link IllegalArgumentException} when the mask's dimension
+     * differs from this pane's dimension.
+     *
+     * @param mask the mask to apply to this pane
+     * @throws IllegalArgumentException when the mask's dimension is incorrect
+     * @since 0.5.16
      */
+    public void applyMask(@NotNull Mask mask) {
+        if (length != mask.getLength() || height != mask.getHeight()) {
+            throw new IllegalArgumentException("Mask's dimension must be the same as the pane's dimension");
+        }
+
+        this.mask = mask;
+    }
+
     @Override
     public void flipHorizontally(boolean flipHorizontally) {
         this.flipHorizontally = flipHorizontally;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public void flipVertically(boolean flipVertically) {
         this.flipVertically = flipVertically;
@@ -276,9 +322,6 @@ public class OutlinePane extends Pane implements Flippable, Orientable, Rotatabl
         this.gap = gap;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public void setOrientation(@NotNull Orientation orientation) {
         this.orientation = orientation;
@@ -293,9 +336,6 @@ public class OutlinePane extends Pane implements Flippable, Orientable, Rotatabl
         this.repeat = repeat;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @NotNull
     @Contract(pure = true)
     @Override
@@ -323,9 +363,6 @@ public class OutlinePane extends Pane implements Flippable, Orientable, Rotatabl
         return gap;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @NotNull
     @Override
     public List<GuiItem> getItems() {
@@ -344,27 +381,18 @@ public class OutlinePane extends Pane implements Flippable, Orientable, Rotatabl
         return orientation;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Contract(pure = true)
     @Override
     public int getRotation() {
         return rotation;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Contract(pure = true)
     @Override
     public boolean isFlippedHorizontally() {
         return flipHorizontally;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Contract(pure = true)
     @Override
     public boolean isFlippedVertically() {
@@ -379,7 +407,6 @@ public class OutlinePane extends Pane implements Flippable, Orientable, Rotatabl
      * @return the outline pane
      */
     @NotNull
-    @Contract("_, null -> fail")
     public static OutlinePane load(@NotNull Object instance, @NotNull Element element) {
         try {
             OutlinePane outlinePane = new OutlinePane(
