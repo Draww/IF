@@ -24,7 +24,6 @@ import org.w3c.dom.NodeList;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.InputStream;
-import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -130,7 +129,7 @@ public class Gui implements InventoryHolder {
         this.title = title;
 
         if (!hasRegisteredListeners) {
-            Bukkit.getPluginManager().registerEvents(new GuiListener(), plugin);
+            Bukkit.getPluginManager().registerEvents(new GuiListener(plugin), plugin);
 
             hasRegisteredListeners = true;
         }
@@ -166,8 +165,7 @@ public class Gui implements InventoryHolder {
 
         //ensure that the inventory is cached before being overwritten and restore it if we end up not needing the bottom part after all
         if (state == State.TOP) {
-            humanEntityCache.restore(humanEntity);
-            humanEntityCache.clearCache(humanEntity);
+            humanEntityCache.restoreAndForget(humanEntity);
         }
 
         humanEntity.openInventory(inventory);
@@ -185,11 +183,36 @@ public class Gui implements InventoryHolder {
         }
 
         //copy the viewers
-        List<HumanEntity> viewers = new ArrayList<>(inventory.getViewers());
+        List<HumanEntity> viewers = getViewers();
 
         this.inventory = Bukkit.createInventory(this, rows * 9, getTitle());
 
         viewers.forEach(humanEntity -> humanEntity.openInventory(inventory));
+    }
+
+    /**
+     * Gets the count of {@link HumanEntity} instances that are currently viewing this GUI.
+     *
+     * @return the count of viewers
+     * @since 0.5.19
+     */
+    @Contract(pure = true)
+    public int getViewerCount() {
+        return inventory.getViewers().size();
+    }
+
+    /**
+     * Gets a mutable snapshot of the current {@link HumanEntity} viewers of this GUI.
+     * This is a snapshot (copy) and not a view, therefore modifications aren't visible.
+     *
+     * @return a snapshot of the current viewers
+     * @see #getViewerCount()
+     * @since 0.5.19
+     */
+    @NotNull
+    @Contract(pure = true)
+    public List<HumanEntity> getViewers() {
+        return new ArrayList<>(inventory.getViewers());
     }
 
     /**
@@ -216,7 +239,7 @@ public class Gui implements InventoryHolder {
      */
     public void setTitle(@NotNull String title) {
         //copy the viewers
-        List<HumanEntity> viewers = new ArrayList<>(inventory.getViewers());
+        List<HumanEntity> viewers = getViewers();
 
         this.inventory = Bukkit.createInventory(this, this.inventory.getSize(), title);
         this.title = title;
@@ -241,7 +264,7 @@ public class Gui implements InventoryHolder {
     public void update() {
         updating = true;
 
-        new HashSet<>(inventory.getViewers()).forEach(this::show);
+        getViewers().forEach(this::show);
 
         if (!updating)
             throw new AssertionError("Gui#isUpdating became false before Gui#update finished");
@@ -264,16 +287,9 @@ public class Gui implements InventoryHolder {
         this.state = state;
 
         if (state == State.TOP) {
-            humanEntityCache.restoreAll();
-            humanEntityCache.clearCache();
+            humanEntityCache.restoreAndForgetAll();
         } else if (state == State.BOTTOM) {
-            inventory.getViewers().forEach(humanEntity -> {
-                humanEntityCache.store(humanEntity);
-
-                for (int i = 0; i < 36; i++) {
-                    humanEntity.getInventory().clear(i);
-                }
-            });
+            inventory.getViewers().forEach(humanEntityCache::storeAndClear);
         }
     }
 
